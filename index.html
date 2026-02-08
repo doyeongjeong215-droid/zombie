@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>항해 좀비 생존 타이쿤 - MVP</title>
+    <style>
+      :root {
+        --bg: #0e1726;
+        --panel: #14213d;
+        --panel-2: #1f355a;
+        --accent: #fca311;
+        --danger: #ef476f;
+        --ok: #06d6a0;
+        --text: #edf2f4;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+        background: radial-gradient(circle at top, #1b2f52 0%, var(--bg) 55%);
+        color: var(--text);
+      }
+      .app {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 20px;
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 2fr 1fr;
+      }
+      .card {
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+      }
+      h1, h2, h3 { margin: 0 0 10px; }
+      .sub { opacity: 0.85; margin-bottom: 8px; }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .stat {
+        background: rgba(255, 255, 255, 0.07);
+        border-radius: 10px;
+        padding: 10px;
+      }
+      .label { font-size: 12px; opacity: 0.8; }
+      .value { font-size: 22px; font-weight: 700; }
+      .meter {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.15);
+        margin-top: 6px;
+        overflow: hidden;
+      }
+      .meter > span {
+        display: block;
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), #ffd166);
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px;
+        color: #0e1726;
+        background: var(--accent);
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button.secondary { background: #8ecae6; }
+      button.danger { background: #ff758f; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .log {
+        max-height: 320px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 14px;
+      }
+      .log p { margin: 0 0 8px; line-height: 1.4; }
+      .tag {
+        display: inline-block;
+        font-size: 12px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        margin-right: 6px;
+      }
+      .act { background: rgba(252, 163, 17, 0.25); }
+      .warn { background: rgba(239, 71, 111, 0.3); }
+      .ok { background: rgba(6, 214, 160, 0.3); }
+      .status-line {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .status-pill {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+      }
+      .timeline {
+        margin-top: 14px;
+        font-size: 13px;
+        opacity: 0.88;
+      }
+      @media (max-width: 900px) {
+        .app { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <section class="card">
+        <h1>🧭 생존 항해 타이쿤: Zombie Tide</h1>
+        <p class="sub">낮에는 생존과 제작, 밤에는 좀비 웨이브. 배를 수리하고 외해 탐험을 시작하세요.</p>
+
+        <div class="status-line">
+          <span class="status-pill" id="dayAct">Day 1 · Act 1</span>
+          <span class="status-pill" id="phase">주간 단계</span>
+          <span class="status-pill" id="shipState">난파선 미발견</span>
+          <span class="status-pill" id="baseThreat">기지 위협: 낮음</span>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="actions">
+          <button id="farmBtn">🌾 농사</button>
+          <button id="craftBtn">🔨 제작</button>
+          <button id="restBtn" class="secondary">😴 휴식</button>
+          <button id="defendBtn" class="secondary">🛡️ 방어 준비</button>
+          <button id="exploreBtn">🧭 탐험</button>
+          <button id="sailBtn" class="danger">⛵ 항해 출발</button>
+          <button id="nextBtn" style="grid-column: 1 / -1">⏭️ 다음 날 진행</button>
+        </div>
+
+        <p class="timeline" id="timeline">목표: Day 15 이전 난파선 발견 → Day 30 이전 배 수리 완료.</p>
+      </section>
+
+      <section class="card">
+        <h2>📜 사건 로그</h2>
+        <div class="log" id="log"></div>
+      </section>
+    </div>
+
+    <script>
+      const state = {
+        day: 1,
+        food: 45,
+        materials: 30,
+        stamina: 60,
+        memory: 50,
+        fear: 20,
+        defense: 15,
+        infection: 0,
+        livestock: 6,
+        farm: 100,
+        residents: 9,
+        shipFound: false,
+        shipProgress: 0,
+        sailing: false,
+        sailingFuel: 0,
+        externalLoot: 0,
+        lastAttack: 0,
+      };
+
+      const statConfig = [
+        ["🔋 기력", "stamina", 100],
+        ["🍚 식량", "food", 200],
+        ["🔨 자재", "materials", 200],
+        ["🧠 기억력", "memory", 100],
+        ["😱 공포", "fear", 100],
+        ["☣️ 감염도", "infection", 100],
+        ["🐄 가축", "livestock", 20],
+        ["🏚️ 농장 내구도", "farm", 100],
+      ];
+
+      const statsEl = document.getElementById("stats");
+      const logEl = document.getElementById("log");
+
+      function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+      function rnd(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+      function currentAct() {
+        if (state.day <= 15) return 1;
+        if (state.day <= 30) return 2;
+        return 3;
+      }
+
+      function pushLog(text, type = "act") {
+        const p = document.createElement("p");
+        p.innerHTML = `<span class="tag ${type}">${type.toUpperCase()}</span>${text}`;
+        logEl.prepend(p);
+      }
+
+      function render() {
+        document.getElementById("dayAct").textContent = `Day ${state.day} · Act ${currentAct()}`;
+        document.getElementById("phase").textContent = state.sailing ? "외해 탐험 중" : "섬 운영 단계";
+        document.getElementById("shipState").textContent = state.shipFound
+          ? `배 수리 ${state.shipProgress}%`
+          : "난파선 미발견";
+
+        const threat = state.fear + state.infection + Math.max(0, 50 - state.defense);
+        const threatLabel = threat > 130 ? "매우 높음" : threat > 90 ? "높음" : threat > 60 ? "중간" : "낮음";
+        document.getElementById("baseThreat").textContent = `기지 위협: ${threatLabel}`;
+
+        statsEl.innerHTML = "";
+        for (const [label, key, max] of statConfig) {
+          const value = state[key];
+          const ratio = clamp((value / max) * 100, 0, 100);
+          const stat = document.createElement("div");
+          stat.className = "stat";
+          stat.innerHTML = `
+            <div class="label">${label}</div>
+            <div class="value">${Math.round(value)}</div>
+            <div class="meter"><span style="width:${ratio}%"></span></div>
+          `;
+          statsEl.appendChild(stat);
+        }
+
+        document.getElementById("timeline").textContent =
+          currentAct() === 1
+            ? "Act1 목표: 난파선 발견 + 생존기반 구축"
+            : currentAct() === 2
+            ? "Act2 목표: 기술 해금과 배 수리 완료"
+            : "Act3 목표: 외해 탐험/무역과 섬 방어의 균형";
+
+        document.getElementById("sailBtn").disabled = !state.shipFound || state.shipProgress < 100 || state.sailing;
+      }
+
+      function consumeDaily() {
+        state.food -= 6 + Math.floor(state.residents / 3);
+        state.stamina -= 8;
+        state.memory -= state.sailing ? 7 : 2;
+        if (state.food < 10) state.fear += 8;
+        if (state.memory < 20) state.fear += 4;
+        if (state.food <= 0) {
+          state.infection += 6;
+          state.food = 0;
+          pushLog("식량 고갈로 주민의 면역력이 급격히 떨어졌습니다.", "warn");
+        }
+      }
+
+      function zombieWave() {
+        const power = rnd(20, 45) + state.day + Math.floor(state.infection / 2);
+        const guard = state.defense + rnd(0, 30);
+        if (guard >= power) {
+          state.materials += rnd(2, 8);
+          state.fear = clamp(state.fear - 3, 0, 100);
+          pushLog("야간 좀비 웨이브를 막아내며 전리품을 확보했습니다.", "ok");
+          return;
+        }
+        const damage = power - guard;
+        state.farm = clamp(state.farm - damage, 0, 100);
+        state.livestock = clamp(state.livestock - Math.ceil(damage / 18), 0, 20);
+        state.infection = clamp(state.infection + Math.ceil(damage / 10), 0, 100);
+        state.fear = clamp(state.fear + Math.ceil(damage / 8), 0, 100);
+        state.lastAttack = state.day;
+        pushLog(`기지 침입 발생! 농장 -${damage}% 피해, 가축 일부 감염.`, "warn");
+      }
+
+      function offshoreAttackTick() {
+        if (!state.sailing) return;
+        if (Math.random() < 0.55) {
+          const damage = rnd(8, 20);
+          state.farm = clamp(state.farm - damage, 0, 100);
+          state.infection = clamp(state.infection + rnd(2, 6), 0, 100);
+          pushLog(`항해 중 경고 수신: 섬이 공격받아 농장 ${damage}% 손상! 복귀를 고려하세요.`, "warn");
+        } else {
+          const loot = rnd(8, 18);
+          state.externalLoot += loot;
+          state.materials += loot;
+          state.memory = clamp(state.memory + 3, 0, 100);
+          pushLog(`외해 탐험 성과: 희귀 자재 ${loot} 확보.`, "ok");
+        }
+      }
+
+      function checkStoryEvents() {
+        if (!state.shipFound && state.day >= 8 && state.memory >= 35) {
+          state.shipFound = true;
+          pushLog("절벽 아래 난파선을 발견했습니다. 바깥세상으로 향할 희망이 생겼습니다.", "act");
+        }
+        if (state.shipFound && state.shipProgress >= 40 && state.day > 15 && state.day <= 30) {
+          pushLog("난파선 해체 기술로 전기 설비와 화기 제작이 해금되었습니다.", "act");
+        }
+        if (state.livestock > 0 && state.infection > 35 && Math.random() < 0.35) {
+          state.livestock = clamp(state.livestock - 1, 0, 20);
+          pushLog("가축 좀비화 발생! 사육장 방역이 필요합니다.", "warn");
+        }
+      }
+
+      function nextDay() {
+        state.day += 1;
+        consumeDaily();
+        zombieWave();
+        offshoreAttackTick();
+        if (state.sailing) {
+          state.sailingFuel -= 1;
+          if (state.sailingFuel <= 0) {
+            state.sailing = false;
+            pushLog("원정 연료가 소진되어 섬으로 귀환했습니다.", "act");
+          }
+        }
+        state.fear = clamp(state.fear - 1, 0, 100);
+        state.stamina = clamp(state.stamina, 0, 100);
+        state.memory = clamp(state.memory, 0, 100);
+        checkGameOver();
+        checkStoryEvents();
+        render();
+      }
+
+      function checkGameOver() {
+        if (state.farm <= 0 || state.infection >= 100 || state.residents <= 0) {
+          pushLog("콜로니가 붕괴했습니다. 새 루프를 시작하세요 (새로고침).", "warn");
+          Array.from(document.querySelectorAll("button")).forEach((b) => (b.disabled = true));
+        }
+      }
+
+      document.getElementById("farmBtn").onclick = () => {
+        const gain = rnd(8, 16) + Math.floor(state.farm / 20);
+        state.food += gain;
+        state.stamina -= 10;
+        pushLog(`농사를 통해 식량 +${gain}.`, "ok");
+        render();
+      };
+      document.getElementById("craftBtn").onclick = () => {
+        if (state.materials < 6) return pushLog("자재가 부족해 제작에 실패했습니다.", "warn");
+        state.materials -= 6;
+        state.defense += rnd(4, 9);
+        state.shipProgress += state.shipFound ? rnd(5, 12) : 0;
+        state.shipProgress = clamp(state.shipProgress, 0, 100);
+        state.stamina -= 8;
+        pushLog("방어시설 강화 및 선체 수리 진행.", "ok");
+        render();
+      };
+      document.getElementById("restBtn").onclick = () => {
+        state.stamina = clamp(state.stamina + 18, 0, 100);
+        state.memory = clamp(state.memory + 6, 0, 100);
+        state.food -= 5;
+        pushLog("휴식으로 기력과 기억력이 회복되었습니다.", "act");
+        render();
+      };
+      document.getElementById("defendBtn").onclick = () => {
+        state.materials -= 4;
+        if (state.materials < 0) {
+          state.materials = 0;
+          return pushLog("자재 부족으로 함정 배치 실패.", "warn");
+        }
+        state.defense += 10;
+        state.fear = clamp(state.fear - 5, 0, 100);
+        pushLog("주민을 배치해 야간 자동 방어를 강화했습니다.", "ok");
+        render();
+      };
+      document.getElementById("exploreBtn").onclick = () => {
+        state.stamina -= 12;
+        state.memory += rnd(3, 8);
+        state.materials += rnd(4, 10);
+        if (!state.shipFound && Math.random() < 0.35) {
+          state.shipFound = true;
+          pushLog("해안 탐색 중 난파선을 발견했습니다!", "act");
+        } else {
+          pushLog("탐험으로 자재와 단서를 확보했습니다.", "act");
+        }
+        render();
+      };
+      document.getElementById("sailBtn").onclick = () => {
+        state.sailing = true;
+        state.sailingFuel = 3;
+        state.food -= 10;
+        state.stamina -= 15;
+        pushLog("돛을 올리고 외해 탐험을 시작했습니다. 기지 자동방어를 믿어야 합니다.", "act");
+        render();
+      };
+      document.getElementById("nextBtn").onclick = nextDay;
+
+      pushLog("생존 루프 시작: 낮에 준비하고 밤에 버텨라.", "act");
+      render();
+    </script>
+  </body>
+</html>
