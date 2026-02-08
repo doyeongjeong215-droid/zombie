@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Zombie Tide - Keyboard MVP</title>
+    <title>Zombie Tide - Farming & Tool MVP</title>
     <style>
       :root {
         --bg: #08111f;
         --panel: #10223f;
         --panel2: #19345e;
+        --text: #edf2f4;
         --accent: #ffb703;
         --ok: #12d6a4;
         --warn: #ff4d6d;
-        --text: #edf2f4;
       }
       * { box-sizing: border-box; }
       body {
@@ -37,6 +37,7 @@
       }
       h1,h2,p { margin: 0 0 8px; }
       .muted { opacity: .85; font-size: 14px; }
+      .game-wrap { position: relative; }
       canvas {
         width: 100%;
         height: auto;
@@ -45,11 +46,36 @@
         background: #07101f;
         image-rendering: pixelated;
       }
+      .hotbar {
+        position: absolute;
+        left: 50%;
+        bottom: 14px;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 8px;
+        background: rgba(4,8,15,.72);
+        border: 1px solid rgba(255,255,255,.25);
+        border-radius: 10px;
+        padding: 8px;
+      }
+      .slot {
+        min-width: 78px;
+        text-align: center;
+        font-size: 12px;
+        border: 1px solid rgba(255,255,255,.2);
+        border-radius: 8px;
+        padding: 6px;
+        background: rgba(255,255,255,.06);
+      }
+      .slot.active {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(255,183,3,.25) inset;
+      }
       .stats {
         display: grid;
         grid-template-columns: repeat(2,minmax(0,1fr));
         gap: 8px;
-        margin: 8px 0;
+        margin-top: 8px;
       }
       .s {
         background: rgba(255,255,255,.08);
@@ -70,14 +96,17 @@
   <body>
     <div class="wrap">
       <section class="card">
-        <h1>🧭 Zombie Tide (키보드 실시간 MVP)</h1>
-        <p class="muted">WASD/방향키 이동 · <b>Space</b> 상호작용/공격 · <b>Shift</b> 달리기</p>
-        <canvas id="game" width="832" height="544"></canvas>
+        <h1>🧭 Zombie Tide (농사/도구 확장 MVP)</h1>
+        <p class="muted">이동: WASD/방향키 · 사용: Space · 달리기: Shift · 도구 선택: 1~5</p>
+        <div class="game-wrap">
+          <canvas id="game" width="832" height="544"></canvas>
+          <div class="hotbar" id="hotbar"></div>
+        </div>
         <div class="stats" id="stats"></div>
       </section>
       <section class="card">
         <h2>📜 로그</h2>
-        <p class="muted">스타듀밸리처럼 이동하면서 구역에 접근해 실시간으로 진행됩니다.</p>
+        <p class="muted">공터에 나무/광석을 배치했습니다. 도구로 땅파기·벌목·채광 후 작물 심기를 할 수 있습니다.</p>
         <div class="log" id="log"></div>
       </section>
     </div>
@@ -87,25 +116,55 @@
       const ctx = canvas.getContext("2d");
       const logEl = document.getElementById("log");
       const statsEl = document.getElementById("stats");
-
+      const hotbarEl = document.getElementById("hotbar");
       const W = canvas.width, H = canvas.height;
+      const TILE = 32;
       const keys = new Set();
+
+      const tools = [
+        { key: "1", icon: "🪓", name: "도끼" },
+        { key: "2", icon: "⛏️", name: "곡괭이" },
+        { key: "3", icon: "🧹", name: "괭이" },
+        { key: "4", icon: "🌱", name: "씨앗" },
+        { key: "5", icon: "🗡️", name: "무기" },
+      ];
+
       const state = {
-        day: 1, dayTime: 0, dayLength: 120,
-        food: 50, materials: 40, stamina: 100, memory: 50,
-        fear: 18, infection: 0, defense: 18, farm: 100, livestock: 6,
-        hp: 100, shipFound: false, shipProgress: 0, atSea: false, seaTimer: 0,
-        zombies: [], spawnTick: 0, interactCd: 0, hitCd: 0,
+        day: 1,
+        dayTime: 0,
+        dayLength: 120,
+        food: 60,
+        wood: 20,
+        stone: 10,
+        ore: 0,
+        seeds: 18,
+        stamina: 100,
+        hp: 100,
+        memory: 50,
+        fear: 18,
+        infection: 0,
+        farm: 100,
+        shipFound: false,
+        shipProgress: 0,
+        atSea: false,
+        seaTimer: 0,
+        selected: 2,
+        interactCd: 0,
+        hitCd: 0,
+        zombies: [],
+        spawnTick: 0,
+        trees: [],
+        ores: [],
+        plots: {},
       };
-      const player = { x: 416, y: 300, r: 11, speed: 160, dir: 0 };
+
+      const player = { x: 416, y: 300, r: 10, speed: 165, dirX: 1, dirY: 0 };
 
       const zones = {
-        farm: { x: 80, y: 330, w: 170, h: 130, name: "농장" },
-        workshop: { x: 295, y: 340, w: 130, h: 105, name: "작업대" },
-        rest: { x: 445, y: 355, w: 110, h: 95, name: "휴식처" },
-        tower: { x: 585, y: 315, w: 145, h: 145, name: "방어탑" },
-        beach: { x: 620, y: 90, w: 165, h: 130, name: "해안" },
-        dock: { x: 80, y: 90, w: 155, h: 125, name: "선착장" },
+        field: { x: 64, y: 80, w: 460, h: 400, name: "공터" },
+        workshop: { x: 566, y: 84, w: 200, h: 120, name: "작업대" },
+        dock: { x: 566, y: 226, w: 200, h: 110, name: "선착장" },
+        camp: { x: 566, y: 360, w: 200, h: 118, name: "야영지" },
       };
 
       function log(msg, type="act") {
@@ -116,134 +175,280 @@
       const clamp=(v,a,b)=>Math.max(a,Math.min(v,b));
       const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
       const act = ()=> state.day<=15?1:state.day<=30?2:3;
-      function near(zone){ return player.x>zone.x&&player.x<zone.x+zone.w&&player.y>zone.y&&player.y<zone.y+zone.h; }
+      const keyOf = (tx,ty) => `${tx},${ty}`;
 
-      function action() {
+      function initFieldNodes() {
+        for (let i = 0; i < 18; i++) {
+          const tx = rnd(2, 14), ty = rnd(3, 13);
+          state.trees.push({ tx, ty, hp: 3 });
+        }
+        for (let i = 0; i < 9; i++) {
+          const tx = rnd(3, 14), ty = rnd(3, 13);
+          state.ores.push({ tx, ty, hp: 4 });
+        }
+      }
+
+      function renderHotbar() {
+        hotbarEl.innerHTML = tools.map((tool, i) => `
+          <div class="slot ${state.selected===i?"active":""}">
+            <div>${tool.key} ${tool.icon}</div>
+            <div>${tool.name}</div>
+          </div>
+        `).join("");
+      }
+
+      function tileFromPos(x, y) {
+        return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) };
+      }
+
+      function frontTile() {
+        const px = player.x + player.dirX * TILE * 0.9;
+        const py = player.y + player.dirY * TILE * 0.9;
+        return tileFromPos(px, py);
+      }
+
+      function tileCenter(tx, ty) {
+        return { x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2 };
+      }
+
+      function inRect(x, y, r) { return x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h; }
+
+      function findTree(tx, ty) { return state.trees.find(t => t.tx === tx && t.ty === ty); }
+      function findOre(tx, ty) { return state.ores.find(o => o.tx === tx && o.ty === ty); }
+
+      function useTool() {
         if (state.interactCd > 0) return;
-        state.interactCd = 0.24;
+        state.interactCd = 0.18;
 
-        if (near(zones.farm)) {
-          const gain = rnd(6,12)+Math.floor(state.farm/25);
-          state.food += gain; state.stamina -= 5;
-          log(`농사 수확 +${gain} 식량`, "ok"); return;
-        }
-        if (near(zones.workshop)) {
-          if (state.materials < 6) { log("자재가 부족합니다.", "warn"); return; }
-          state.materials -= 6; state.defense += rnd(3,7); state.stamina -= 7;
-          if (state.shipFound) state.shipProgress = clamp(state.shipProgress + rnd(4,10), 0, 100);
-          log("제작 완료: 방어 강화/선체 수리 진행", "ok"); return;
-        }
-        if (near(zones.rest)) {
-          if (state.food < 4) { log("식량이 부족해 휴식 효율이 낮습니다.", "warn"); }
-          state.food = Math.max(0, state.food-4); state.stamina = clamp(state.stamina+20,0,100); state.memory = clamp(state.memory+7,0,100);
-          log("휴식으로 기력과 기억력 회복", "act"); return;
-        }
-        if (near(zones.tower)) {
-          if (state.materials < 5) { log("함정 설치 실패: 자재 부족", "warn"); return; }
-          state.materials -= 5; state.defense += 12; state.fear = clamp(state.fear-5,0,100);
-          log("자동 방어 설비를 증설했습니다.", "ok"); return;
-        }
-        if (near(zones.beach)) {
-          state.stamina -= 8; state.memory += rnd(2,7); state.materials += rnd(4,9);
-          if (!state.shipFound && Math.random() < 0.4) { state.shipFound = true; log("난파선을 발견했습니다! 배 수리 가능", "act"); }
-          else log("해안 탐색: 자재와 단서 수집", "act");
-          return;
-        }
-        if (near(zones.dock)) {
-          if (!state.shipFound || state.shipProgress < 100) { log("배 상태 부족: 발견/수리 필요", "warn"); return; }
-          if (state.atSea) { log("이미 원정 중입니다.", "warn"); return; }
-          state.atSea = true; state.seaTimer = 28; state.food = Math.max(0,state.food-10); state.stamina = clamp(state.stamina-10,0,100);
-          log("⛵ 외해 원정 시작! 섬은 자동 방어에 맡겨집니다.", "act");
+        const { tx, ty } = frontTile();
+        const k = keyOf(tx, ty);
+        const plot = state.plots[k] || { tilled: false, crop: null };
+
+        // 작업대 상호작용
+        if (inRect(player.x, player.y, zones.workshop)) {
+          if (state.wood >= 8 && state.ore >= 2 && state.shipFound) {
+            state.wood -= 8; state.ore -= 2;
+            state.shipProgress = clamp(state.shipProgress + rnd(8, 15), 0, 100);
+            log(`작업대에서 선체 수리 진행: ${state.shipProgress}%`, "ok");
+          } else if (!state.shipFound) {
+            log("난파선을 먼저 발견해야 합니다.", "warn");
+          } else {
+            log("선체 수리 재료 부족 (목재8+광석2 필요)", "warn");
+          }
           return;
         }
 
-        // 구역이 아니면 공격
-        let target = null, min = 9999;
-        for (const z of state.zombies) {
-          const d = Math.hypot(player.x-z.x, player.y-z.y);
-          if (d < 52 && d < min) { min = d; target = z; }
+        if (inRect(player.x, player.y, zones.camp)) {
+          state.stamina = clamp(state.stamina + 22, 0, 100);
+          state.food = Math.max(0, state.food - 4);
+          state.memory = clamp(state.memory + 6, 0, 100);
+          log("야영지에서 휴식: 기력/기억력 회복", "act");
+          return;
         }
-        if (target) {
-          target.hp -= 40;
+
+        if (inRect(player.x, player.y, zones.dock)) {
+          if (!state.shipFound || state.shipProgress < 100) {
+            log("선착장: 배를 완전히 수리해야 출항할 수 있습니다.", "warn");
+          } else if (state.atSea) {
+            log("이미 원정 중입니다.", "warn");
+          } else {
+            state.atSea = true;
+            state.seaTimer = 30;
+            state.food = Math.max(0, state.food - 10);
+            state.stamina = clamp(state.stamina - 10, 0, 100);
+            log("⛵ 외해 원정 출발! 기지는 자동 방어 상태", "act");
+          }
+          return;
+        }
+
+        const current = tools[state.selected];
+        if (!inRect(player.x, player.y, zones.field)) {
+          if (current.name !== "무기") {
+            log("도구는 공터에서 사용하세요.", "warn");
+            return;
+          }
+        }
+
+        if (current.name === "괭이") {
+          if (findTree(tx, ty) || findOre(tx, ty)) {
+            log("해당 칸에 장애물이 있어 땅을 팔 수 없습니다.", "warn");
+            return;
+          }
+          if (!plot.tilled) {
+            plot.tilled = true;
+            state.plots[k] = plot;
+            state.stamina = clamp(state.stamina - 4, 0, 100);
+            log(`땅을 갈았습니다. (${tx},${ty})`, "ok");
+          }
+          return;
+        }
+
+        if (current.name === "씨앗") {
+          if (state.seeds <= 0) { log("씨앗이 없습니다.", "warn"); return; }
+          if (plot.tilled && !plot.crop) {
+            plot.crop = { stage: 0, age: 0 };
+            state.seeds -= 1;
+            state.plots[k] = plot;
+            state.stamina = clamp(state.stamina - 2, 0, 100);
+            log("씨앗을 심었습니다.", "ok");
+          } else {
+            log("갈아둔 빈 땅에만 심을 수 있습니다.", "warn");
+          }
+          return;
+        }
+
+        if (current.name === "도끼") {
+          const tree = findTree(tx, ty);
+          if (!tree) { log("앞 칸에 벨 수 있는 나무가 없습니다.", "warn"); return; }
+          tree.hp -= 1;
           state.stamina = clamp(state.stamina - 3, 0, 100);
-          log("좀비를 공격했습니다.", "ok");
+          if (tree.hp <= 0) {
+            state.trees = state.trees.filter(t => t !== tree);
+            state.wood += rnd(3, 6);
+            log("벌목 완료! 목재를 획득했습니다.", "ok");
+          } else {
+            log("나무를 찍었습니다.", "act");
+          }
+          return;
         }
+
+        if (current.name === "곡괭이") {
+          const ore = findOre(tx, ty);
+          if (!ore) { log("앞 칸에 캘 수 있는 광석이 없습니다.", "warn"); return; }
+          ore.hp -= 1;
+          state.stamina = clamp(state.stamina - 4, 0, 100);
+          if (ore.hp <= 0) {
+            state.ores = state.ores.filter(o => o !== ore);
+            state.stone += rnd(2, 4);
+            state.ore += rnd(1, 2);
+            log("채광 성공! 돌/광석 획득", "ok");
+          } else {
+            log("광석을 채굴 중입니다.", "act");
+          }
+          return;
+        }
+
+        // 무기
+        let target = null;
+        for (const z of state.zombies) {
+          const d = Math.hypot(player.x - z.x, player.y - z.y);
+          if (d < 56) { target = z; break; }
+        }
+        if (!target) {
+          log("근처에 공격할 좀비가 없습니다.", "warn");
+          return;
+        }
+        target.hp -= 45;
+        state.stamina = clamp(state.stamina - 3, 0, 100);
+        log("좀비를 공격했습니다!", "ok");
       }
 
       function spawnZombie() {
         const edge = rnd(0,3);
         let x=0,y=0;
-        if (edge===0){x=rnd(0,W);y=-10;} if (edge===1){x=W+10;y=rnd(0,H);} if (edge===2){x=rnd(0,W);y=H+10;} if (edge===3){x=-10;y=rnd(0,H);} 
-        state.zombies.push({x,y,hp:100,speed:rnd(35,58)});
+        if (edge===0){x=rnd(0,W);y=-10;}
+        if (edge===1){x=W+10;y=rnd(0,H);}
+        if (edge===2){x=rnd(0,W);y=H+10;}
+        if (edge===3){x=-10;y=rnd(0,H);}
+        state.zombies.push({ x, y, hp: 100, speed: rnd(40, 60) });
       }
 
       function dailyTick() {
         state.day += 1;
         state.food -= 8;
-        state.stamina = clamp(state.stamina - 4, 0, 100);
-        state.memory = clamp(state.memory - (state.atSea?6:2), 0, 100);
-        if (state.food <= 0) { state.food = 0; state.infection += 6; state.fear += 8; log("식량 고갈! 감염과 공포 증가", "warn"); }
-        if (state.memory < 20) state.fear += 4;
+        state.stamina = clamp(state.stamina - 3, 0, 100);
+        state.memory = clamp(state.memory - (state.atSea ? 6 : 2), 0, 100);
+        if (state.food <= 0) {
+          state.food = 0;
+          state.infection = clamp(state.infection + 6, 0, 100);
+          state.fear = clamp(state.fear + 8, 0, 100);
+          log("식량 고갈! 감염/공포 상승", "warn");
+        }
+        if (state.memory < 20) state.fear = clamp(state.fear + 4, 0, 100);
 
-        if (!state.shipFound && state.day >= 8 && state.memory >= 35) {
-          state.shipFound = true; log("절벽 아래 난파선을 찾아냈습니다.", "act");
+        // 작물 성장
+        for (const key of Object.keys(state.plots)) {
+          const p = state.plots[key];
+          if (p.crop) {
+            p.crop.age += 1;
+            if (p.crop.age >= 2 && p.crop.stage < 3) {
+              p.crop.age = 0;
+              p.crop.stage += 1;
+            }
+            if (p.crop.stage >= 3) {
+              state.food += rnd(3, 6);
+              p.crop = null;
+              p.tilled = true;
+              log("작물이 자라 수확되었습니다! 식량 +", "ok");
+            }
+          }
         }
-        if (state.shipFound && state.shipProgress >= 40 && state.day > 15 && state.day <= 30) {
-          log("전기/화기 기술 해금! 좀비 대응력이 높아집니다.", "act");
-        }
-        if (state.infection > 35 && state.livestock > 0 && Math.random() < 0.35) {
-          state.livestock -= 1; log("가축 좀비화 발생!", "warn");
+
+        if (!state.shipFound && state.day >= 6) {
+          state.shipFound = true;
+          log("해안에서 난파선을 찾아냈습니다. 수리를 시작할 수 있습니다.", "act");
         }
       }
 
       function update(dt) {
         state.dayTime += dt;
-        if (state.dayTime >= state.dayLength) { state.dayTime = 0; dailyTick(); }
+        if (state.dayTime >= state.dayLength) {
+          state.dayTime = 0;
+          dailyTick();
+        }
+
         if (state.interactCd > 0) state.interactCd -= dt;
         if (state.hitCd > 0) state.hitCd -= dt;
 
         const run = keys.has("Shift") && state.stamina > 0;
         const speed = player.speed * (run ? 1.45 : 1);
-        if (run) state.stamina = clamp(state.stamina - 13 * dt, 0, 100);
+        if (run) state.stamina = clamp(state.stamina - 12 * dt, 0, 100);
 
         let dx = 0, dy = 0;
         if (keys.has("ArrowUp") || keys.has("w")) dy -= 1;
         if (keys.has("ArrowDown") || keys.has("s")) dy += 1;
         if (keys.has("ArrowLeft") || keys.has("a")) dx -= 1;
         if (keys.has("ArrowRight") || keys.has("d")) dx += 1;
+
         if (dx || dy) {
-          const l = Math.hypot(dx,dy); dx/=l; dy/=l;
-          player.x = clamp(player.x + dx*speed*dt, 18, W-18);
-          player.y = clamp(player.y + dy*speed*dt, 18, H-18);
-          player.dir = Math.atan2(dy,dx);
+          const l = Math.hypot(dx, dy);
+          dx /= l; dy /= l;
+          player.x = clamp(player.x + dx * speed * dt, 18, W - 18);
+          player.y = clamp(player.y + dy * speed * dt, 18, H - 18);
+          player.dirX = dx;
+          player.dirY = dy;
         }
 
-        const isNight = state.dayTime > state.dayLength * 0.55;
+        const isNight = state.dayTime > state.dayLength * 0.58;
         if (isNight) {
           state.spawnTick += dt;
-          const interval = clamp(3.2 - state.day*0.04, 1.1, 3.2);
-          if (state.spawnTick >= interval) { state.spawnTick = 0; spawnZombie(); }
+          const interval = clamp(3.2 - state.day * 0.04, 1.0, 3.2);
+          if (state.spawnTick >= interval) {
+            state.spawnTick = 0;
+            spawnZombie();
+          }
         }
 
-        const target = {x: zones.farm.x+zones.farm.w/2, y: zones.farm.y+zones.farm.h/2};
+        const fieldTarget = { x: zones.field.x + zones.field.w / 2, y: zones.field.y + zones.field.h / 2 };
         for (const z of state.zombies) {
-          const tx = player.x, ty = player.y;
-          const distP = Math.hypot(z.x - tx, z.y - ty);
-          const chaseP = distP < 130;
-          const gx = chaseP ? tx : target.x, gy = chaseP ? ty : target.y;
+          const distP = Math.hypot(z.x - player.x, z.y - player.y);
+          const chaseP = distP < 150;
+          const gx = chaseP ? player.x : fieldTarget.x;
+          const gy = chaseP ? player.y : fieldTarget.y;
           const vx = gx - z.x, vy = gy - z.y;
-          const l = Math.max(1, Math.hypot(vx,vy));
-          z.x += (vx/l) * z.speed * dt;
-          z.y += (vy/l) * z.speed * dt;
+          const l = Math.max(1, Math.hypot(vx, vy));
+          z.x += (vx / l) * z.speed * dt;
+          z.y += (vy / l) * z.speed * dt;
 
-          if (Math.hypot(z.x-player.x, z.y-player.y) < 18 && state.hitCd <= 0) {
+          if (Math.hypot(z.x - player.x, z.y - player.y) < 18 && state.hitCd <= 0) {
             state.hitCd = 0.8;
-            state.hp = clamp(state.hp - 6, 0, 100);
+            state.hp = clamp(state.hp - 7, 0, 100);
             state.fear = clamp(state.fear + 2, 0, 100);
             log("좀비에게 피해를 입었습니다!", "warn");
           }
-          if (z.x > zones.farm.x && z.x < zones.farm.x+zones.farm.w && z.y > zones.farm.y && z.y < zones.farm.y+zones.farm.h) {
-            state.farm = clamp(state.farm - 7 * dt, 0, 100);
+
+          if (inRect(z.x, z.y, zones.field)) {
+            state.farm = clamp(state.farm - 5 * dt, 0, 100);
           }
         }
         state.zombies = state.zombies.filter(z => z.hp > 0);
@@ -251,22 +456,22 @@
         if (state.atSea) {
           state.seaTimer -= dt;
           if (Math.random() < 0.02 * dt) {
-            const dmg = rnd(4,11);
-            state.farm = clamp(state.farm-dmg,0,100);
-            state.infection = clamp(state.infection+rnd(1,4),0,100);
+            const dmg = rnd(4, 11);
+            state.farm = clamp(state.farm - dmg, 0, 100);
+            state.infection = clamp(state.infection + rnd(1, 4), 0, 100);
             log(`원정 중 기지 습격! 농장 ${dmg}% 피해`, "warn");
           }
-          if (Math.random() < 0.018 * dt) {
-            const loot = rnd(6,14);
-            state.materials += loot;
+          if (Math.random() < 0.015 * dt) {
+            const loot = rnd(2, 5);
+            state.ore += loot;
             state.memory = clamp(state.memory + 3, 0, 100);
-            log(`외해 성과 +${loot} 자재`, "ok");
+            log(`외해 탐사 성과: 광석 +${loot}`, "ok");
           }
-          if (state.seaTimer <= 0) { state.atSea = false; log("원정 귀환 완료", "act"); }
+          if (state.seaTimer <= 0) {
+            state.atSea = false;
+            log("원정 귀환 완료", "act");
+          }
         }
-
-        state.fear = clamp(state.fear - 0.35*dt, 0, 100);
-        state.infection = clamp(state.infection, 0, 100);
 
         if (state.hp <= 0 || state.farm <= 0 || state.infection >= 100) {
           log("콜로니 붕괴. 새로고침으로 재시작하세요.", "warn");
@@ -274,77 +479,138 @@
         }
       }
 
-      function rect(z, c) { ctx.fillStyle = c; ctx.fillRect(z.x, z.y, z.w, z.h); }
+      function drawZone(r, color) {
+        ctx.fillStyle = color;
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+      }
+
+      function drawFieldGrid() {
+        for (let y = 0; y < H / TILE; y++) {
+          for (let x = 0; x < W / TILE; x++) {
+            const cx = x * TILE, cy = y * TILE;
+            if (inRect(cx + 1, cy + 1, zones.field)) {
+              ctx.fillStyle = "#2b4b2e";
+              ctx.fillRect(cx, cy, TILE - 1, TILE - 1);
+              const p = state.plots[keyOf(x, y)];
+              if (p?.tilled) {
+                ctx.fillStyle = "#5d3f23";
+                ctx.fillRect(cx + 2, cy + 2, TILE - 5, TILE - 5);
+              }
+              if (p?.crop) {
+                const colors = ["#6dbf45", "#8ecf62", "#c2e56f", "#f3ff9f"];
+                ctx.fillStyle = colors[p.crop.stage] || colors[3];
+                ctx.beginPath();
+                ctx.arc(cx + 16, cy + 16, 6 + p.crop.stage, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+        }
+      }
+
+      function drawNodes() {
+        for (const t of state.trees) {
+          const c = tileCenter(t.tx, t.ty);
+          ctx.fillStyle = "#6c9a36";
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, 11, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#523417";
+          ctx.fillRect(c.x - 3, c.y + 7, 6, 9);
+        }
+        for (const o of state.ores) {
+          const c = tileCenter(o.tx, o.ty);
+          ctx.fillStyle = "#8a93a8";
+          ctx.beginPath();
+          ctx.moveTo(c.x, c.y - 11);
+          ctx.lineTo(c.x + 11, c.y);
+          ctx.lineTo(c.x + 4, c.y + 11);
+          ctx.lineTo(c.x - 9, c.y + 8);
+          ctx.lineTo(c.x - 11, c.y - 3);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
       function draw() {
-        const isNight = state.dayTime > state.dayLength * 0.55;
-        ctx.fillStyle = isNight ? "#06101d" : "#0b1a2f";
-        ctx.fillRect(0,0,W,H);
+        const isNight = state.dayTime > state.dayLength * 0.58;
+        ctx.fillStyle = isNight ? "#06101d" : "#0c1a2c";
+        ctx.fillRect(0, 0, W, H);
 
-        rect(zones.farm, "#375a33");
-        rect(zones.workshop, "#54657f");
-        rect(zones.rest, "#7b6548");
-        rect(zones.tower, "#5a475f");
-        rect(zones.beach, "#9d845f");
-        rect(zones.dock, "#3b5a77");
+        drawZone(zones.workshop, "#4c5e79");
+        drawZone(zones.dock, "#31506e");
+        drawZone(zones.camp, "#6f5940");
+        drawFieldGrid();
+        drawNodes();
 
-        ctx.fillStyle = "rgba(255,255,255,.85)";
+        ctx.fillStyle = "rgba(255,255,255,.9)";
         ctx.font = "12px sans-serif";
-        for (const z of Object.values(zones)) ctx.fillText(z.name, z.x+8, z.y+18);
+        for (const z of Object.values(zones)) ctx.fillText(z.name, z.x + 8, z.y + 18);
 
         for (const z of state.zombies) {
           ctx.beginPath();
           ctx.fillStyle = "#b5179e";
-          ctx.arc(z.x,z.y,10,0,Math.PI*2);
+          ctx.arc(z.x, z.y, 10, 0, Math.PI * 2);
           ctx.fill();
         }
 
+        const front = frontTile();
+        ctx.strokeStyle = "rgba(255,183,3,.95)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(front.tx * TILE + 2, front.ty * TILE + 2, TILE - 4, TILE - 4);
+
         ctx.beginPath();
         ctx.fillStyle = "#ffb703";
-        ctx.arc(player.x,player.y,player.r,0,Math.PI*2);
+        ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = "#222";
         ctx.beginPath();
         ctx.moveTo(player.x, player.y);
-        ctx.lineTo(player.x + Math.cos(player.dir)*16, player.y + Math.sin(player.dir)*16);
+        ctx.lineTo(player.x + player.dirX * 16, player.y + player.dirY * 16);
         ctx.stroke();
 
         if (isNight) {
-          ctx.fillStyle = "rgba(0,0,0,.28)";
-          ctx.fillRect(0,0,W,H);
+          ctx.fillStyle = "rgba(0,0,0,.30)";
+          ctx.fillRect(0, 0, W, H);
         }
       }
 
       function renderStats() {
-        const isNight = state.dayTime > state.dayLength*0.55;
-        const txt = [
+        const isNight = state.dayTime > state.dayLength * 0.58;
+        const rows = [
           ["Day / Act", `${state.day} / ${act()}`],
-          ["시간", isNight?"🌙 야간":"☀️ 주간"],
+          ["시간", isNight ? "🌙 야간" : "☀️ 주간"],
           ["HP", Math.round(state.hp)],
           ["기력", Math.round(state.stamina)],
           ["식량", state.food],
-          ["자재", state.materials],
-          ["기억력", Math.round(state.memory)],
-          ["방어력", state.defense],
-          ["감염도", state.infection],
-          ["공포", Math.round(state.fear)],
+          ["씨앗", state.seeds],
+          ["목재", state.wood],
+          ["돌", state.stone],
+          ["광석", state.ore],
           ["농장", Math.round(state.farm)],
           ["선박", state.shipFound ? `${state.shipProgress}%` : "미발견"],
           ["원정", state.atSea ? `진행중 ${Math.ceil(state.seaTimer)}s` : "대기"],
+          ["감염도", state.infection],
           ["좀비", state.zombies.length],
         ];
-        statsEl.innerHTML = txt.map(([k,v])=>`<div class="s">${k}<div class="v">${v}</div></div>`).join("");
+        statsEl.innerHTML = rows.map(([k, v]) => `<div class="s">${k}<div class="v">${v}</div></div>`).join("");
       }
 
-      window.addEventListener("keydown", (e)=>{
-        if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault();
-        if (e.key === " ") action();
-        keys.add(e.key.length===1?e.key.toLowerCase():e.key);
+      window.addEventListener("keydown", (e) => {
+        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) e.preventDefault();
+        if (e.key === " ") useTool();
+        const idx = tools.findIndex(t => t.key === e.key);
+        if (idx >= 0) {
+          state.selected = idx;
+          renderHotbar();
+        }
+        keys.add(e.key.length === 1 ? e.key.toLowerCase() : e.key);
       });
-      window.addEventListener("keyup", (e)=> keys.delete(e.key.length===1?e.key.toLowerCase():e.key));
+      window.addEventListener("keyup", (e) => keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
 
       let last = performance.now(), loopId;
       function loop(now) {
-        const dt = Math.min(0.033, (now-last)/1000);
+        const dt = Math.min(0.033, (now - last) / 1000);
         last = now;
         update(dt);
         draw();
@@ -352,8 +618,10 @@
         loopId = requestAnimationFrame(loop);
       }
 
-      log("생존 시작: 구역으로 이동해서 Space로 상호작용하세요.", "act");
-      log("목표: 난파선 발견 → 수리 100% → 선착장에서 원정.", "act");
+      initFieldNodes();
+      renderHotbar();
+      log("농사 기반 시작: 공터에 괭이(3) → 씨앗(4) 순서로 작물 재배", "act");
+      log("벌목(1)과 채광(2)으로 선박 수리 자원을 모으세요.", "act");
       requestAnimationFrame(loop);
     </script>
   </body>
